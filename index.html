@@ -102,6 +102,16 @@
             display: block;
         }
 
+        /* Forces the cropper frame to look circular and centered */
+        .cropper-view-box,
+        .cropper-face {
+            border-radius: 50%;
+        }
+        
+        .cropper-line, .cropper-point {
+            display: none; /* Hide resizing handles since the circle box is now locked */
+        }
+
         .preview-section {
             display: flex;
             justify-content: center;
@@ -125,7 +135,7 @@
     <div class="container">
         <header>
             <h1>FCAI-CU 2027 Seniors 🎓</h1>
-            <p>Upload and crop your photo to apply the graduation frame!</p>
+            <p>Upload your photo, adjust the selection, and generate your profile picture!</p>
         </header>
 
         <main>
@@ -138,11 +148,11 @@
 
             <div id="step-2" class="step-section">
                 <h3>Adjust Your Photo</h3>
-                <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Drag to move, scroll to zoom.</p>
+                <p style="font-size: 14px; color: #666; margin-bottom: 15px;">Boundaries are disabled. Drag your photo anywhere or zoom out freely. Exposed areas turn white.</p>
                 <div class="crop-container">
                     <img id="crop-image" src="" alt="To be cropped">
                 </div>
-                <button id="applyCropBtn" class="btn">2. Apply Crop & Frame</button>
+                <button id="applyCropBtn" class="btn">2. Combine Image & Frame</button>
                 <button id="backToUploadBtn" class="btn btn-outline" style="margin-top: 10px;">Choose a different photo</button>
             </div>
 
@@ -186,7 +196,7 @@
             stepElement.classList.add('active-step');
         }
 
-        // STEP 1: Upload
+        // STEP 1: Upload Handling
         imageUpload.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (!file) return;
@@ -202,57 +212,72 @@
 
                 cropper = new Cropper(cropImage, {
                     aspectRatio: 1, 
-                    viewMode: 1,    
-                    dragMode: 'move', 
-                    autoCropArea: 1,
-                    background: false,
+                    viewMode: 0,             // Completely drops image canvas containment constraints
+                    dragMode: 'move',        // Default to dragging the image layer, not the cropbox
+                    autoCropArea: 1,         // Force cropbox to maximum size inside the container
+                    cropBoxMovable: false,   // Keeps the cropbox completely fixed in the center
+                    cropBoxResizable: false, // Prevents user from altering the central frame box dimensions
+                    background: true,
                 });
             };
             reader.readAsDataURL(file);
         });
 
-        // STEP 2: Apply Crop
+        // STEP 2: Render Image Under Frame with White Padding Fill
         applyCropBtn.addEventListener('click', function() {
             if (!cropper) return;
 
+            // Generate crop canvas. Setting fillStyle to '#ffffff' paints extended boundaries white
             const croppedCanvas = cropper.getCroppedCanvas({
                 width: 1080,
-                height: 1080
+                height: 1080,
+                fillColor: '#ffffff' 
             });
 
+            // Set final canvas frame dimensions
             canvas.width = frameImg.width || 1080;
             canvas.height = frameImg.height || 1080;
 
-            // Draw cropped photo
-            ctx.drawImage(croppedCanvas, 0, 0, canvas.width, canvas.height);
+            // Clear previous contexts
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Overlay frame
-            try {
-                ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
-            } catch(e) {
-                console.error("Frame failed to draw: ", e);
-            }
+            // 1. Render frame layer normally on top configuration
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height);
+
+            // 2. Set layers to stack user input image strictly underneath transparent sections
+            ctx.globalCompositeOperation = 'destination-over';
+            
+            // Mask user photo layout into a tidy circle format
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, canvas.width / 2, 0, Math.PI * 2, true);
+            ctx.closePath();
+            ctx.clip();
+
+            // Draw cropped user layer beneath the frame canvas
+            ctx.drawImage(croppedCanvas, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // Reset composite rendering back to standard default
+            ctx.globalCompositeOperation = 'source-over';
 
             showStep(step3);
         });
 
-        // STEP 3: Download (with security error handling)
+        // STEP 3: Safe Download Logic Execution
         downloadBtn.addEventListener('click', function() {
             try {
                 const link = document.createElement('a');
                 link.download = 'FCAI-CU-2027-Senior-Frame.png';
+                link.href = canvas.toDataURL('image/png', 1.0); 
                 
-                // Convert canvas to image data
-                link.href = canvas.toDataURL('image/png', 1.0);
-                
-                // Append to body to ensure compatibility across all browsers
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
             } catch (error) {
-                // Friendly error message explaining the CORS/Local file issue
-                alert("⚠️ Local Security Block:\n\nBrowsers block image downloads from canvas elements when run locally via file://.\n\nTo test this successfully, please use a local server (like Live Server in VS Code) or push your code to GitHub Pages / Netlify / Vercel.");
-                console.error("Download Error Details:", error);
+                alert("⚠️ Local Security Block:\n\nBrowsers block image downloads from canvas elements when run locally via file://.\n\nTo run successfully, push this project to GitHub Pages, Netlify, or open via 'Live Server' in VS Code.");
+                console.error(error);
             }
         });
 
